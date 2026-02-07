@@ -1,17 +1,26 @@
 
 import React from 'react';
-import { StrategyType } from '../types';
+import { StrategyType, AlertSettings } from '../types';
 
 interface StrategyPanelProps {
   activeStrategy: StrategyType;
   setActiveStrategy: (s: StrategyType) => void;
   params: any;
   setParams: (p: any) => void;
+  alertSettings: AlertSettings;
+  setAlertSettings: (s: AlertSettings) => void;
 }
 
-const StrategyPanel: React.FC<StrategyPanelProps> = ({ activeStrategy, setActiveStrategy, params, setParams }) => {
+const StrategyPanel: React.FC<StrategyPanelProps> = ({ 
+  activeStrategy, 
+  setActiveStrategy, 
+  params, 
+  setParams,
+  alertSettings,
+  setAlertSettings
+}) => {
   return (
-    <div className="bg-slate-800 p-4 border-r border-slate-700 h-full overflow-y-auto w-80">
+    <div className="bg-slate-800 p-4 border-r border-slate-700 h-full overflow-y-auto w-80 shrink-0">
       <h2 className="text-xl font-bold mb-6 text-indigo-400">Strategy Engine</h2>
       
       <div className="mb-6">
@@ -30,7 +39,6 @@ const StrategyPanel: React.FC<StrategyPanelProps> = ({ activeStrategy, setActive
       <div className="space-y-4">
         <h3 className="text-xs font-semibold uppercase text-slate-400 border-b border-slate-700 pb-1">Parameters</h3>
         
-        {/* Risk Management */}
         <div>
           <label className="block text-sm text-slate-300 mb-1">Risk per Trade (%)</label>
           <input 
@@ -86,6 +94,47 @@ const StrategyPanel: React.FC<StrategyPanelProps> = ({ activeStrategy, setActive
             <option value="Trailing">Trailing ATR Stop</option>
             <option value="Signal">Opposite Signal</option>
           </select>
+        </div>
+
+        <h3 className="text-xs font-semibold uppercase text-slate-400 border-b border-slate-700 pb-1 pt-4">Alert System</h3>
+        
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-300">Trade Entry Signals</span>
+            <input 
+              type="checkbox" 
+              checked={alertSettings.enableEntry}
+              onChange={(e) => setAlertSettings({ ...alertSettings, enableEntry: e.target.checked })}
+              className="w-4 h-4 bg-slate-900 border-slate-700 rounded accent-indigo-500"
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-300">Trade Exit Signals</span>
+            <input 
+              type="checkbox" 
+              checked={alertSettings.enableExit}
+              onChange={(e) => setAlertSettings({ ...alertSettings, enableExit: e.target.checked })}
+              className="w-4 h-4 bg-slate-900 border-slate-700 rounded accent-indigo-500"
+            />
+          </div>
+          
+          <div className="mt-4 space-y-2">
+            <label className="block text-[10px] uppercase text-slate-500 font-bold">Notification Methods</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button 
+                onClick={() => setAlertSettings({ ...alertSettings, onScreen: !alertSettings.onScreen })}
+                className={`text-[10px] py-1 px-2 rounded border transition-colors ${alertSettings.onScreen ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-slate-900 border-slate-700 text-slate-500'}`}
+              >
+                On-Screen
+              </button>
+              <button 
+                onClick={() => setAlertSettings({ ...alertSettings, consoleLog: !alertSettings.consoleLog })}
+                className={`text-[10px] py-1 px-2 rounded border transition-colors ${alertSettings.consoleLog ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-slate-900 border-slate-700 text-slate-500'}`}
+              >
+                Console Log
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="pt-6">

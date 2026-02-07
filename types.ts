@@ -56,3 +56,19 @@ export interface StrategyStats {
   totalTrades: number;
   netProfit: number;
 }
+
+export interface AlertSettings {
+  enableEntry: boolean;
+  enableExit: boolean;
+  onScreen: boolean;
+  consoleLog: boolean;
+  sound: boolean;
+}
+
+export interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  timestamp: number;
+}

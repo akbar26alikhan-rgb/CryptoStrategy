@@ -1,0 +1,7 @@
+{
+  "name": "CryptoStrategy Pro Dashboard",
+  "description": "A high-performance crypto trading dashboard featuring 10 advanced technical strategies including EMA Trend, RSI Divergence, SMC, and TTM Squeeze with real-time charting and backtesting analytics.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}

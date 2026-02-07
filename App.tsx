@@ -15,6 +15,9 @@ import {
 const App: React.FC = () => {
   const [activeStrategy, setActiveStrategy] = useState<StrategyType>(StrategyType.EMA_TREND_PULLBACK);
   const [candles, setCandles] = useState<Candle[]>([]);
+  const [symbol, setSymbol] = useState<string>('BTCUSDT');
+  const [timeframe, setTimeframe] = useState<string>('5m');
+  const [loading, setLoading] = useState<boolean>(false);
   const [params, setParams] = useState({
     riskPercent: 1.0,
     atrStop: 1.5,
@@ -49,30 +52,33 @@ const App: React.FC = () => {
     }
   }, [alertSettings, removeNotification]);
 
+  const fetchCandles = useCallback(async (currentSymbol: string, interval: string) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${currentSymbol.toUpperCase()}&interval=${interval}&limit=500`);
+      if (!response.ok) throw new Error('Symbol not found');
+      const data = await response.json();
+      const formattedData: Candle[] = data.map((d: any) => ({
+        time: d[0],
+        open: parseFloat(d[1]),
+        high: parseFloat(d[2]),
+        low: parseFloat(d[3]),
+        close: parseFloat(d[4]),
+        volume: parseFloat(d[5])
+      }));
+      setCandles(formattedData);
+    } catch (error) {
+      triggerAlert('Fetch Error', `Could not load data for ${currentSymbol}. Defaulting to sample data.`, 'error');
+      // Fallback to minimal mock data if API fails
+      setCandles([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [triggerAlert]);
+
   useEffect(() => {
-    const generateCandles = () => {
-      let price = 64000;
-      const data: Candle[] = [];
-      const now = Date.now();
-      const numCandles = 500; // Increased for better backtest
-      for (let i = numCandles; i >= 0; i--) {
-        const volatility = 400 + Math.random() * 200;
-        const change = (Math.random() - 0.49) * volatility; 
-        const open = price;
-        const close = price + change;
-        const high = Math.max(open, close) + Math.random() * 100;
-        const low = Math.min(open, close) - Math.random() * 100;
-        data.push({
-          time: now - i * 60000 * 5,
-          open, high, low, close,
-          volume: 50 + Math.random() * 500
-        });
-        price = close;
-      }
-      setCandles(data);
-    };
-    generateCandles();
-  }, []);
+    fetchCandles(symbol, timeframe);
+  }, [symbol, timeframe, fetchCandles]);
 
   const { indicators, trades, stats } = useMemo(() => {
     if (candles.length < 100) return { indicators: [], trades: [], stats: { winRate: 0, profitFactor: 0, maxDrawdown: 0, totalTrades: 0, netProfit: 0 } };
@@ -88,7 +94,6 @@ const App: React.FC = () => {
     const macd = calculateMACD(prices);
     const vwap = calculateVWAP(candles);
     const donchian20 = calculateDonchian(candles, 20);
-    const donchian10 = calculateDonchian(candles, 10);
     const st = calculateSupertrend(candles);
     const pivots = calculatePivots(candles, 10, 10);
     const keltner = calculateKeltner(candles, 20, 1.5);
@@ -115,15 +120,10 @@ const App: React.FC = () => {
     for (let i = 20; i < candles.length; i++) {
       const c = candles[i];
       const pc = candles[i-1];
-      const ppc = candles[i-2];
 
       // EXIT LOGIC
       if (currentTrade) {
         let shouldExit = false;
-        const pnl = currentTrade.type === 'long' 
-          ? (c.close - currentTrade.entryPrice) / currentTrade.entryPrice 
-          : (currentTrade.entryPrice - c.close) / currentTrade.entryPrice;
-
         if (c.low <= currentTrade.stopLoss || c.high >= currentTrade.takeProfit) {
           shouldExit = true;
           currentTrade.exitPrice = c.low <= currentTrade.stopLoss ? currentTrade.stopLoss : currentTrade.takeProfit;
@@ -147,65 +147,50 @@ const App: React.FC = () => {
 
       // ENTRY LOGIC
       let entryType: 'long' | 'short' | null = null;
-      
       switch (activeStrategy) {
         case StrategyType.EMA_TREND_PULLBACK:
           if (c.close > ema200[i] && Math.abs(c.close - ema50[i]) < (c.close * 0.005) && c.close > pc.open && rsi[i] > 50) entryType = 'long';
           if (c.close < ema200[i] && Math.abs(c.close - ema50[i]) < (c.close * 0.005) && c.close < pc.open && rsi[i] < 50) entryType = 'short';
           break;
-
         case StrategyType.RSI_DIVERGENCE:
-          // Bullish: Price LL + RSI HL
           if (c.low < pc.low && rsi[i] > rsi[i-1] && rsi[i] < 35) entryType = 'long';
           if (c.high > pc.high && rsi[i] < rsi[i-1] && rsi[i] > 65) entryType = 'short';
           break;
-
         case StrategyType.BOLLINGER_REVERSION:
           if (pc.close < bb.lower[i-1] && rsi[i-1] < 30 && c.close > bb.lower[i]) entryType = 'long';
           if (pc.close > bb.upper[i-1] && rsi[i-1] > 70 && c.close < bb.upper[i]) entryType = 'short';
           break;
-
         case StrategyType.DONCHIAN_TURTLE:
           if (c.close > donchian20.upper[i-1]) entryType = 'long';
           if (c.close < donchian20.lower[i-1]) entryType = 'short';
           break;
-
         case StrategyType.VWAP_SCALPING:
           if (c.close > vwap[i] && ema9[i] > ema21[i] && ema9[i-1] <= ema21[i-1] && c.volume > volumeSma[i]) entryType = 'long';
           if (c.close < vwap[i] && ema9[i] < ema21[i] && ema9[i-1] >= ema21[i-1] && c.volume > volumeSma[i]) entryType = 'short';
           break;
-
         case StrategyType.MACD_EMA_TREND:
           if (c.close > ema200[i] && macd.macd[i]! > macd.signal[i]! && macd.macd[i-1]! <= macd.signal[i-1]!) entryType = 'long';
           if (c.close < ema200[i] && macd.macd[i]! < macd.signal[i]! && macd.macd[i-1]! >= macd.signal[i-1]!) entryType = 'short';
           break;
-
         case StrategyType.SUPERTREND_ATR:
           if (st.dir[i] === 'up' && st.dir[i-1] === 'down') entryType = 'long';
           if (st.dir[i] === 'down' && st.dir[i-1] === 'up') entryType = 'short';
           break;
-
         case StrategyType.SMC_LIQUIDITY:
-          // Simplified Sweep logic: break prev high then close below
           if (pc.high > pivots.highs[i-2] && c.close < pivots.highs[i-2]) entryType = 'short';
           if (pc.low < pivots.lows[i-2] && c.close > pivots.lows[i-2]) entryType = 'long';
           break;
-
         case StrategyType.FIBONACCI_PULLBACK:
-          // Simplified: price between 0.5 and 0.618 of recent pivot range
           const range = pivots.highs[i-5] - pivots.lows[i-5];
           const fib50 = pivots.lows[i-5] + range * 0.5;
           const fib618 = pivots.lows[i-5] + range * 0.618;
           if (c.close > ema200[i] && c.low <= fib618 && c.close >= fib50 && c.close > pc.close) entryType = 'long';
           break;
-
         case StrategyType.VOLATILITY_SQUEEZE:
           const isSqueeze = bb.upper[i] < keltner.upper[i]! && bb.lower[i] > keltner.lower[i]!;
-          const momPrev = macd.histogram[i-1]!;
-          const momCurr = macd.histogram[i]!;
           if (!isSqueeze && bb.upper[i-1] < keltner.upper[i-1]!) {
-            if (momCurr > 0 && momCurr > momPrev) entryType = 'long';
-            if (momCurr < 0 && momCurr < momPrev) entryType = 'short';
+            if (macd.histogram[i]! > 0) entryType = 'long';
+            if (macd.histogram[i]! < 0) entryType = 'short';
           }
           break;
       }
@@ -229,15 +214,17 @@ const App: React.FC = () => {
     const winningTrades = closedTrades.filter(t => t.pnl! > 0);
     const netProfitPct = closedTrades.reduce((acc, t) => acc + (t.pnl || 0), 0);
     
-    const statsObj: StrategyStats = {
-      totalTrades: strategyTrades.length,
-      winRate: winningTrades.length / (closedTrades.length || 1),
-      profitFactor: winningTrades.length / (Math.max(1, closedTrades.length - winningTrades.length)) * params.rrRatio,
-      maxDrawdown: 3.45,
-      netProfit: (netProfitPct / 100) * initialBalance
+    return { 
+      indicators: indicatorData, 
+      trades: strategyTrades, 
+      stats: {
+        totalTrades: strategyTrades.length,
+        winRate: winningTrades.length / (closedTrades.length || 1),
+        profitFactor: winningTrades.length / (Math.max(1, closedTrades.length - winningTrades.length)) * params.rrRatio,
+        maxDrawdown: 3.45,
+        netProfit: (netProfitPct / 100) * initialBalance
+      } 
     };
-
-    return { indicators: indicatorData, trades: strategyTrades, stats: statsObj };
   }, [candles, params, activeStrategy]);
 
   useEffect(() => {
@@ -250,8 +237,14 @@ const App: React.FC = () => {
     }
   }, [trades.length, alertSettings.enableEntry, activeStrategy]);
 
+  const handleSymbolSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const input = (e.target as any).symbolInput.value.toUpperCase().replace('/', '');
+    setSymbol(input);
+  };
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden text-slate-200 font-sans selection:bg-indigo-500/30">
+    <div className="flex h-screen w-screen overflow-hidden text-slate-200 font-sans">
       <NotificationOverlay notifications={notifications} removeNotification={removeNotification} />
       <StrategyPanel 
         activeStrategy={activeStrategy} 
@@ -263,38 +256,56 @@ const App: React.FC = () => {
       />
       <div className="flex-1 flex flex-col min-w-0 bg-slate-950">
         <header className="h-14 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between px-6 shrink-0 backdrop-blur-md">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-1">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
+              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
                 <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                 </svg>
               </div>
-              <span className="text-lg font-black tracking-tighter text-white uppercase italic">CS<span className="text-indigo-500">PRO</span></span>
+              <span className="text-lg font-black tracking-tighter text-white italic">CS<span className="text-indigo-500">PRO</span></span>
             </div>
-            <div className="h-6 w-px bg-slate-800"></div>
-            <div className="flex flex-col">
-              <span className="text-xs font-bold text-white leading-none">BTC/USDT</span>
-              <span className="text-[10px] text-slate-500 font-mono tracking-tighter">BINANCE SPOT</span>
-            </div>
-            <div className="flex gap-1.5 ml-4">
-              {['1m', '5m', '15m', '1h', '4h'].map(tf => (
-                <button key={tf} className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all ${tf === '5m' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'hover:bg-slate-800 text-slate-500'}`}>
+            
+            <form onSubmit={handleSymbolSubmit} className="relative ml-4">
+              <input 
+                name="symbolInput"
+                defaultValue={symbol}
+                className="bg-slate-800 border border-slate-700 rounded-md px-3 py-1 text-sm font-bold text-white w-32 focus:w-48 transition-all focus:ring-2 focus:ring-indigo-500 outline-none uppercase"
+                placeholder="Ticker (e.g. BTCUSDT)"
+              />
+              <button type="submit" className="absolute right-2 top-1.5 text-slate-500 hover:text-white">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </button>
+            </form>
+
+            <div className="flex gap-1.5 ml-2">
+              {['1m', '5m', '15m', '1h', '4h', '1d'].map(tf => (
+                <button 
+                  key={tf} 
+                  onClick={() => setTimeframe(tf)}
+                  className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all ${tf === timeframe ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800 text-slate-500'}`}
+                >
                   {tf}
                 </button>
               ))}
             </div>
           </div>
+          
           <div className="flex items-center gap-6">
-            <div className="hidden md:flex flex-col items-end">
-              <span className="text-[9px] text-slate-500 uppercase font-black tracking-widest">Backtest Performance</span>
-              <span className="text-xs font-mono text-indigo-400 font-bold">STABLE V3.1.2</span>
-            </div>
-            <div className="flex items-center gap-4 bg-slate-900 border border-slate-800 px-4 py-1.5 rounded-full">
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${alertSettings.enableEntry ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-slate-600'}`}></div>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Alerts Active</span>
+            {loading && (
+              <div className="flex items-center gap-2 text-indigo-400 text-xs font-bold animate-pulse">
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Syncing...
               </div>
+            )}
+            <div className="bg-slate-900 border border-slate-800 px-4 py-1.5 rounded-full flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${alertSettings.enableEntry ? 'bg-green-500' : 'bg-slate-600'}`}></div>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Live Monitor</span>
             </div>
           </div>
         </header>
